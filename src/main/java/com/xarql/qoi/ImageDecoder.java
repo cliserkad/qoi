@@ -10,8 +10,9 @@ import java.nio.file.Files;
 import java.util.Arrays;
 
 public class ImageDecoder {
-    /** Amount of pixels to be indexed. Set as 64 because 2 bits in the encoded byte are used as a tag, leaving 6 bits
-     * that can represent 64 values. */
+    /**
+     * Amount of pixels to be indexed. Set as 64 because 2 bits in the encoded byte are used as a tag, leaving 6 bits that can represent 64 values.
+     */
     public static final int PIXEL_INDEX_SIZE = 64;
     /** Magic number. Purpose unknown */
     public static final byte[] MAGIC = { 'q', 'o', 'i', 'f' };
@@ -21,6 +22,10 @@ public class ImageDecoder {
     public static final int DIFF_MASK_GREEN = 0B00001100;
     public static final int DIFF_MASK_BLUE  = 0B00000011;
     public static final int DIFF_OFFSET = -2; // minus 2 from raw unsigned value
+    public static final int RUN_OFFSET = 1;
+    public static final int RUN_MAX = 62; // to prevent collisions with RGB & RGBA tags
+
+    public static final int BOTTOM_SIX_MASK = 0B00000000_00000000_00000000_00111111;
 
     // specification calls for an unsigned int, but java doesn't support unsigned numbers
     // longs will encompass the entirety of an unsigned int's range without issue
@@ -40,6 +45,11 @@ public class ImageDecoder {
     private PixelRGBA prevPixel = INIT_PIXEL;
 
     private byte[] qoi;
+
+    private int x = 0;
+    private int y = 0;
+    private int currByte = 15;
+    private BufferedImage img;
 
     public static void main(String[] args) throws IOException {
         String homeDir = System.getProperty("user.home");
@@ -64,13 +74,10 @@ public class ImageDecoder {
 
         // check for magic numbers :)
         for(int i = 0; i < 4; i++)
-            if(qoi[i] != MAGIC[i])
-                throw new IllegalArgumentException("File does not start with magic numbers: " + Arrays.toString(MAGIC));
-        if(qoi[qoi.length - 1] != 0x01)
-            throw new IllegalArgumentException("File's last byte is not " + 0x01);
+            if(qoi[i] != MAGIC[i]) throw new IllegalArgumentException("File does not start with magic numbers: " + Arrays.toString(MAGIC));
+        if(qoi[qoi.length - 1] != 0x01) throw new IllegalArgumentException("File's last byte is not " + 0x01);
         for(int i = qoi.length - 2; i > qoi.length - 9; i--)
-            if(qoi[i] != 0x00)
-                throw new IllegalArgumentException("Not all of bytes " + (qoi.length - 9) + " through " + (qoi.length - 2) + " are " + 0x00);
+            if(qoi[i] != 0x00) throw new IllegalArgumentException("Not all of bytes " + (qoi.length - 9) + " through " + (qoi.length - 2) + " are " + 0x00);
 
         width = decodeInt(4);
         height = decodeInt(8);
@@ -78,47 +85,58 @@ public class ImageDecoder {
         System.out.println("width: " + width);
         System.out.println("height: " + height);
 
-        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        int x = 0;
-        int y = 0;
-        int currByte = 15;
-        PixelRGBA newPixel = null;
-        while(y < height) {
-            try {
+        img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        try {
+            while(y < height) {
+
                 Tag tag = Tag.matchTag(qoi[currByte]);
-                switch (tag) {
-                    case DIFF -> newPixel = decodeDiff(currByte);
-                    case INDEX -> newPixel = decodeIndex(currByte);
+                switch(tag) {
+                    case DIFF -> setPixelAndAdvance(decodeDiff(currByte));
+                    case INDEX -> setPixelAndAdvance(decodeIndex(currByte));
+                    case RUN -> setPixelsInRun(currByte);
                     default -> {
                         System.out.println(tag.name());
-                        newPixel = new PixelRGBA();
+                        setPixelAndAdvance(new PixelRGBA());
                     }
                 }
 
-                img.setRGB(x, y, newPixel.int_ARGB());
-                if(pixelIndex[newPixel.indexPosition()] == null)
-                    pixelIndex[newPixel.indexPosition()] = newPixel;
-                prevPixel = newPixel;
-                currByte += 1;
-                x += 1;
-                if (x == width) {
-                    x = 0;
-                    y += 1;
-                }
-            } catch (ArrayIndexOutOfBoundsException e) {
-                e.printStackTrace();
-                System.out.println("x: " + x + ", y: " + y);
-                System.out.println("width: " + width + ", height: " + height);
-                return img;
+
             }
+        } catch(ArrayIndexOutOfBoundsException e) {
+            e.printStackTrace();
+            System.out.println("x: " + x + ", y: " + y);
+            System.out.println("width: " + width + ", height: " + height);
+            return img;
         }
         return img;
     }
 
+    public void setPixelAndAdvance(PixelRGBA pixel) {
+        img.setRGB(x, y, pixel.int_ARGB());
+        if(pixelIndex[pixel.indexPosition()] == null)
+            pixelIndex[pixel.indexPosition()] = pixel;
+        prevPixel = pixel;
+        currByte += 1;
+        x += 1;
+        if(x == width) {
+            x = 0;
+            y += 1;
+        }
+    }
+
+    public void setPixelsInRun(int position) {
+        int run = qoi[position] & BOTTOM_SIX_MASK;
+        if(run > RUN_MAX)
+            System.err.println("Run tag had an invalid value of " + run);
+        // throw new IllegalStateException("Run tag had an invalid value of " + run);
+        run += RUN_OFFSET;
+        for(int i = 0; i < run; i++)
+            setPixelAndAdvance(prevPixel);
+    }
+
     public PixelRGBA decodeIndex(int position) {
         int index = qoi[position] & (~Tag.TOP_2_BITMASK);
-        if(pixelIndex[index] == null)
-            return new PixelRGBA();
+        if(pixelIndex[index] == null) return new PixelRGBA();
         return pixelIndex[index];
     }
 
