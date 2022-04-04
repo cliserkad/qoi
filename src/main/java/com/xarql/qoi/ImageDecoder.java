@@ -27,6 +27,12 @@ public class ImageDecoder {
 
     public static final int BOTTOM_SIX_MASK = 0B00000000_00000000_00000000_00111111;
 
+    public static final int LUMA_MASK_GREEN = 0B00000000_00000000_00111111_00000000;
+    public static final int LUMA_MASK_RED   = 0B00000000_00000000_00000000_11110000;
+    public static final int LUMA_MASK_BLUE  = 0B00000000_00000000_00000000_00001111;
+    public static final int LUMA_GREEN_OFFSET = -32;
+    public static final int LUMA_RED_BLUE_OFFSET = -8;
+
     // specification calls for an unsigned int, but java doesn't support unsigned numbers
     // longs will encompass the entirety of an unsigned int's range without issue
 
@@ -94,13 +100,12 @@ public class ImageDecoder {
                     case DIFF -> setPixelAndAdvance(decodeDiff(currByte));
                     case INDEX -> setPixelAndAdvance(decodeIndex(currByte));
                     case RUN -> setPixelsInRun(currByte);
+                    case LUMA -> setPixelAndAdvance(decodeLuma(currByte));
                     default -> {
                         System.out.println(tag.name());
                         setPixelAndAdvance(new PixelRGBA());
                     }
                 }
-
-
             }
         } catch(ArrayIndexOutOfBoundsException e) {
             e.printStackTrace();
@@ -126,12 +131,33 @@ public class ImageDecoder {
 
     public void setPixelsInRun(int position) {
         int run = qoi[position] & BOTTOM_SIX_MASK;
-        if(run > RUN_MAX)
-            System.err.println("Run tag had an invalid value of " + run);
+       // if(run < 0 || run > RUN_MAX)
+           // System.err.println("Run tag had an invalid value of " + run);
         // throw new IllegalStateException("Run tag had an invalid value of " + run);
         run += RUN_OFFSET;
         for(int i = 0; i < run; i++)
             setPixelAndAdvance(prevPixel);
+    }
+
+    public PixelRGBA decodeLuma(int position) {
+        int byte1 = qoi[position];
+        int byte2 = qoi[position + 1];
+        int diffGreen = (byte1 & 0x3f) + LUMA_GREEN_OFFSET;
+        int redDiff = diffGreen - 8 + ((byte2 >> 4) & 0x0f);
+        int blueDiff = diffGreen - 8 + (byte2 & 0x0f);
+
+        /*
+        int luma = (qoi[position] << 8) + qoi[position + 1];
+        int greenDiff = luma & LUMA_MASK_GREEN;
+        int redDiff = luma & LUMA_MASK_RED;
+        int blueDiff = luma & LUMA_MASK_BLUE;
+         */
+
+        int red = wrapInt(prevPixel.r + redDiff);
+        int green = wrapInt(prevPixel.g + diffGreen);
+        int blue = wrapInt(prevPixel.b + blueDiff);
+
+        return new PixelRGBA(red, green, blue, prevPixel.a);
     }
 
     public PixelRGBA decodeIndex(int position) {
@@ -154,9 +180,9 @@ public class ImageDecoder {
 
     public int wrapInt(int i) {
         if(i < 0)
-            return 255;
+            return 256 + i;
         else if(i > 255)
-            return 0;
+            return i - 256;
         else
             return i;
     }
