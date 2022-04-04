@@ -91,7 +91,8 @@ public class ImageDecoder {
         System.out.println("width: " + width);
         System.out.println("height: " + height);
 
-        img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+
         try {
             while(y < height) {
 
@@ -101,10 +102,8 @@ public class ImageDecoder {
                     case INDEX -> setPixelAndAdvance(decodeIndex(currByte));
                     case RUN -> setPixelsInRun(currByte);
                     case LUMA -> setPixelAndAdvance(decodeLuma(currByte));
-                    case RGBA, RGB ->  {
-                        for(int i = 0; i < 2; i++)
-                        setPixelAndAdvance(new PixelRGBA());
-                    }
+                    case RGB -> setPixelAndAdvance(decodeRGB(currByte));
+                    case RGBA -> setPixelAndAdvance(decodeRGBA(currByte));
                     default -> {
                         System.out.println(tag.name());
                         setPixelAndAdvance(new PixelRGBA());
@@ -118,6 +117,23 @@ public class ImageDecoder {
             return img;
         }
         return img;
+    }
+
+    public PixelRGBA decodeRGBA(int position) {
+        currByte += 4;
+        int red = wrapInt(qoi[position + 1]);
+        int green = wrapInt(qoi[position + 2]);
+        int blue = wrapInt(qoi[position + 3]);
+        int alpha = wrapInt(qoi[position] + 4);
+        return new PixelRGBA(red, green, blue, alpha);
+    }
+
+    public PixelRGBA decodeRGB(int position) {
+        currByte += 3;
+        int red = wrapInt(qoi[position + 1]);
+        int green = wrapInt(qoi[position + 2]);
+        int blue = wrapInt(qoi[position + 3]);
+        return new PixelRGBA(red, green, blue, prevPixel.a);
     }
 
     public void setPixelAndAdvance(PixelRGBA pixel) {
@@ -144,6 +160,7 @@ public class ImageDecoder {
     }
 
     public PixelRGBA decodeLuma(int position) {
+        currByte += 1;
         int byte1 = qoi[position];
         int byte2 = qoi[position + 1];
         int diffGreen = (byte1 & 0x3f) + LUMA_GREEN_OFFSET;
@@ -179,16 +196,11 @@ public class ImageDecoder {
         int green = wrapInt(prevPixel.g + greenDiff);
         int blue = wrapInt(prevPixel.b + blueDiff);
 
-        return new PixelRGBA(red, green, blue, 0);
+        return new PixelRGBA(red, green, blue, prevPixel.a);
     }
 
     public int wrapInt(int i) {
-        if(i < 0)
-            return 256 + i;
-        else if(i > 255)
-            return i - 256;
-        else
-            return i;
+        return i & Tag.BOTTOM_8_BITMASK;
     }
 
     public int decodeInt(int start) {

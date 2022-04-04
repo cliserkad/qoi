@@ -6,7 +6,7 @@ package main.java.com.xarql.qoi;
  * Holds 4 discrete bytes, one for each color channel plus an alpha channel
  */
 public class PixelRGBA {
-    public static final int DEFAULT_ALPHA = 0;
+    public static final int DEFAULT_ALPHA = 255;
     public static final String OUT_OF_BOUNDS = "Value out of bounds [0, 255]: ";
 
     public final int r;
