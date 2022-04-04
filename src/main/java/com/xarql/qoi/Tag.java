@@ -10,6 +10,7 @@ public enum Tag {
 
     /** Selects only the first 2 bits of a byte when using bitwise AND */
     public static final int TOP_2_BITMASK = 0B11000000;
+    public static final int BOTTOM_8_BITMASK = 0B00000000_00000000_00000000_11111111;
 
     public final int value;
 
@@ -17,7 +18,8 @@ public enum Tag {
         this.value = value;
     }
 
-    public static Tag matchTag(byte encodedByte) {
+    public static Tag matchTag(int encodedByte) {
+        encodedByte &= BOTTOM_8_BITMASK;
         if(encodedByte == RGB.value)
             return RGB;
         else if(encodedByte == RGBA.value)

@@ -101,6 +101,10 @@ public class ImageDecoder {
                     case INDEX -> setPixelAndAdvance(decodeIndex(currByte));
                     case RUN -> setPixelsInRun(currByte);
                     case LUMA -> setPixelAndAdvance(decodeLuma(currByte));
+                    case RGBA, RGB ->  {
+                        for(int i = 0; i < 2; i++)
+                        setPixelAndAdvance(new PixelRGBA());
+                    }
                     default -> {
                         System.out.println(tag.name());
                         setPixelAndAdvance(new PixelRGBA());
@@ -131,10 +135,10 @@ public class ImageDecoder {
 
     public void setPixelsInRun(int position) {
         int run = qoi[position] & BOTTOM_SIX_MASK;
-       // if(run < 0 || run > RUN_MAX)
-           // System.err.println("Run tag had an invalid value of " + run);
-        // throw new IllegalStateException("Run tag had an invalid value of " + run);
+        if(run < 0 || run > RUN_MAX)
+            System.err.println("Run tag had an invalid value of " + run);
         run += RUN_OFFSET;
+        // throw new IllegalStateException("Run tag had an invalid value of " + run);
         for(int i = 0; i < run; i++)
             setPixelAndAdvance(prevPixel);
     }
@@ -161,7 +165,7 @@ public class ImageDecoder {
     }
 
     public PixelRGBA decodeIndex(int position) {
-        int index = qoi[position] & (~Tag.TOP_2_BITMASK);
+        int index = qoi[position] & BOTTOM_SIX_MASK;
         if(pixelIndex[index] == null) return new PixelRGBA();
         return pixelIndex[index];
     }
