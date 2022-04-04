@@ -78,25 +78,26 @@ public class ImageDecoder {
         System.out.println("width: " + width);
         System.out.println("height: " + height);
 
-        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         int x = 0;
         int y = 0;
-        int currByte = 0;
+        int currByte = 15;
         PixelRGBA newPixel = null;
         while(y < height) {
             try {
                 Tag tag = Tag.matchTag(qoi[currByte]);
-                if (currByte < 10) {
-                    switch (tag) {
-                        case DIFF -> newPixel = decodeDiff(currByte);
-                        default -> {
-                            System.out.println(tag.name());
-                            newPixel = new PixelRGBA();
-                        }
+                switch (tag) {
+                    case DIFF -> newPixel = decodeDiff(currByte);
+                    case INDEX -> newPixel = decodeIndex(currByte);
+                    default -> {
+                        System.out.println(tag.name());
+                        newPixel = new PixelRGBA();
                     }
                 }
 
                 img.setRGB(x, y, newPixel.int_ARGB());
+                if(pixelIndex[newPixel.indexPosition()] == null)
+                    pixelIndex[newPixel.indexPosition()] = newPixel;
                 prevPixel = newPixel;
                 currByte += 1;
                 x += 1;
@@ -111,26 +112,26 @@ public class ImageDecoder {
                 return img;
             }
         }
-
         return img;
+    }
+
+    public PixelRGBA decodeIndex(int position) {
+        int index = qoi[position] & (~Tag.TOP_2_BITMASK);
+        if(pixelIndex[index] == null)
+            return new PixelRGBA();
+        return pixelIndex[index];
     }
 
     public PixelRGBA decodeDiff(int position) {
         int redDiff = ((qoi[position] & DIFF_MASK_RED) >>> 4) + DIFF_OFFSET;
-        System.out.println("redDiff: " + redDiff);
         int greenDiff = ((qoi[position] & DIFF_MASK_GREEN) >>> 2) + DIFF_OFFSET;
-        System.out.println("greenDiff: " + greenDiff);
         int blueDiff = (qoi[position] & DIFF_MASK_BLUE) + DIFF_OFFSET;
-        System.out.println("blueDiff: " + blueDiff);
 
         int red = wrapInt(prevPixel.r + redDiff);
         int green = wrapInt(prevPixel.g + greenDiff);
         int blue = wrapInt(prevPixel.b + blueDiff);
 
-        PixelRGBA output = new PixelRGBA(red, green, blue, 0);
-        System.out.println(output);
-        System.out.println("pixel: " + Integer.toBinaryString(output.int_ARGB()));
-        return output;
+        return new PixelRGBA(red, green, blue, 0);
     }
 
     public int wrapInt(int i) {
