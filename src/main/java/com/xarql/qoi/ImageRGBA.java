@@ -3,11 +3,11 @@ package main.java.com.xarql.qoi;
 /**
  * Contains a 2D array of sRGB pixels
  */
-public class ImageRGB {
-    private final PixelRGB[][] pixels;
+public class ImageRGBA {
+    private final PixelRGBA[][] pixels;
 
-    public ImageRGB(int height, int width) {
-        pixels = new PixelRGB[height][width];
+    public ImageRGBA(int height, int width) {
+        pixels = new PixelRGBA[height][width];
     }
 
     public int getHeight() {
