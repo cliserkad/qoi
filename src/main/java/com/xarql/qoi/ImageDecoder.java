@@ -164,12 +164,11 @@ public class ImageDecoder {
     }
 
     public static int decodeInt(int start, byte[] data) {
-        int num = 0;
-        num = data[start] << 24;
-        num += data[start + 1] << 16;
-        num += data[start + 2] << 8;
-        num += data[start + 3];
-        return num;
+        int a = Byte.toUnsignedInt(data[start]) << 24;
+        int b = Byte.toUnsignedInt(data[start + 1]) << 16;
+        int c = Byte.toUnsignedInt(data[start + 2]) << 8;
+        int d = Byte.toUnsignedInt(data[start + 3]);
+        return a | b | c | d;
     }
 
 }
