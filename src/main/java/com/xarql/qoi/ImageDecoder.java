@@ -36,31 +36,13 @@ public class ImageDecoder {
     // specification calls for an unsigned int, but java doesn't support unsigned numbers
     // longs will encompass the entirety of an unsigned int's range without issue
 
-    /** image width in pixels */
-    private int width;
-    /** image height in pixels */
-    private int height;
-    /** amount of color channels. 3 for RGB, 4 for RGBA */
-    private int channels;
-    /** colorspace id; 0 = sRGB with linear alpha, 1 = all channels linear */
-    private int colorspace;
 
-    /** Practically forms a hash table */
-    private PixelRGBA[] pixelIndex = new PixelRGBA[PIXEL_INDEX_SIZE];
-    /** stores the last seen pixel */
-    private PixelRGBA prevPixel = INIT_PIXEL;
 
-    private byte[] qoi;
-
-    private int x = 0;
-    private int y = 0;
-    private int currByte = 15;
-    private BufferedImage img;
 
     public static void main(String[] args) throws IOException {
         String homeDir = System.getProperty("user.home");
         if(args.length > 0) {
-            BufferedImage img = new ImageDecoder().decode(Files.readAllBytes(new File(homeDir + args[0]).toPath()));
+            BufferedImage img = ImageDecoder.decode(Files.readAllBytes(new File(homeDir + args[0]).toPath()));
             BufferedImage img2 = ImageIO.read(new File(homeDir + args[0].split("\\.")[0] + ".png"));
 
             ImageIcon icon = new ImageIcon(img);
@@ -75,140 +57,118 @@ public class ImageDecoder {
         }
     }
 
-    public BufferedImage decode(byte[] qoi) {
-        this.qoi = qoi;
-
+    public static BufferedImage decode(byte[] data) {
         // check for magic numbers :)
         for(int i = 0; i < 4; i++)
-            if(qoi[i] != MAGIC[i]) throw new IllegalArgumentException("File does not start with magic numbers: " + Arrays.toString(MAGIC));
-        if(qoi[qoi.length - 1] != 0x01) throw new IllegalArgumentException("File's last byte is not " + 0x01);
-        for(int i = qoi.length - 2; i > qoi.length - 9; i--)
-            if(qoi[i] != 0x00) throw new IllegalArgumentException("Not all of bytes " + (qoi.length - 9) + " through " + (qoi.length - 2) + " are " + 0x00);
+            if(data[i] != MAGIC[i]) throw new IllegalArgumentException("File does not start with magic numbers: " + Arrays.toString(MAGIC));
+        if(data[data.length - 1] != 0x01) throw new IllegalArgumentException("File's last byte is not " + 0x01);
+        for(int i = data.length - 2; i > data.length - 9; i--)
+            if(data[i] != 0x00) throw new IllegalArgumentException("Not all of bytes " + (data.length - 9) + " through " + (data.length - 2) + " are " + 0x00);
 
-        width = decodeInt(4);
-        height = decodeInt(8);
+        int width = decodeInt(4, data);
+        int height = decodeInt(8, data);
+        int channels = data[13];
+        int colorspace = data[14];
 
         System.out.println("width: " + width);
         System.out.println("height: " + height);
 
-        img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-
-        try {
-            while(y < height) {
-
-                Tag tag = Tag.matchTag(qoi[currByte]);
+        // Practically forms a hash table
+        PixelRGBA[] index = new PixelRGBA[PIXEL_INDEX_SIZE];
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        PixelRGBA pixel = INIT_PIXEL;
+        int pos = 15;
+        int run = 0;
+        int x = 0;
+        int y = 0;
+        while(y < height && pos < data.length) {
+            if(run == 0) {
+                Tag tag = Tag.matchTag(data[pos]);
                 switch(tag) {
-                    case DIFF -> setPixelAndAdvance(decodeDiff(currByte));
-                    case INDEX -> setPixelAndAdvance(decodeIndex(currByte));
-                    case RUN -> setPixelsInRun(currByte);
-                    case LUMA -> setPixelAndAdvance(decodeLuma(currByte));
-                    case RGB -> setPixelAndAdvance(decodeRGB(currByte));
-                    case RGBA -> setPixelAndAdvance(decodeRGBA(currByte));
-                    default -> {
-                        System.out.println(tag.name());
-                        setPixelAndAdvance(new PixelRGBA());
+                    case DIFF -> {
+                        int redDiff = (data[pos] & DIFF_MASK_RED) + DIFF_OFFSET;
+                        int greenDiff = (data[pos] & DIFF_MASK_GREEN) + DIFF_OFFSET;
+                        int blueDiff = (data[pos] & DIFF_MASK_BLUE) + DIFF_OFFSET;
+
+                        int red = (pixel.r + redDiff) & Tag.BOTTOM_8_BITMASK;
+                        int green = (pixel.g + greenDiff) & Tag.BOTTOM_8_BITMASK;
+                        int blue = (pixel.b + blueDiff) & Tag.BOTTOM_8_BITMASK;
+
+                        pixel = new PixelRGBA(red, green, blue, pixel.a);
                     }
+                    case INDEX -> {
+                        int entry = 0;
+                        try {
+                            entry = data[pos] & BOTTOM_SIX_MASK;
+                            if(index[entry] == null)
+                                throw new NullPointerException("Index tag pointed to a null index");
+                            else pixel = index[entry];
+                        } catch(NullPointerException npe) {
+                            System.err.print("entry: " + entry + " / ");
+                            System.err.println(Integer.toBinaryString(entry));
+
+                        }
+                    }
+                    case RUN -> {
+                        run = data[pos] & BOTTOM_SIX_MASK;
+                        if(run > RUN_MAX) System.err.println("Run tag had an invalid value of " + run);
+                        run += RUN_OFFSET;
+                    }
+                    case LUMA -> {
+                        int byte1 = data[pos];
+                        int byte2 = data[++pos];
+                        int diffGreen = (byte1 & 0x3f) + LUMA_GREEN_OFFSET;
+                        int redDiff = diffGreen - 8 + ((byte2 >> 4) & 0x0f);
+                        int blueDiff = diffGreen - 8 + (byte2 & 0x0f);
+
+                        /*
+                        int luma = (data[position] << 8) + data[position + 1];
+                        int greenDiff = luma & LUMA_MASK_GREEN;
+                        int redDiff = luma & LUMA_MASK_RED;
+                        int blueDiff = luma & LUMA_MASK_BLUE;
+                        */
+
+                        int red = (pixel.r + redDiff) & Tag.BOTTOM_8_BITMASK;
+                        int green = (pixel.g + diffGreen) & Tag.BOTTOM_8_BITMASK;
+                        int blue = (pixel.b + blueDiff) & Tag.BOTTOM_8_BITMASK;
+
+                        pixel = new PixelRGBA(red, green, blue, pixel.a);
+                    }
+                    case RGB -> {
+                        int red = Byte.toUnsignedInt(data[++pos]);
+                        int green = Byte.toUnsignedInt(data[++pos]);
+                        int blue = Byte.toUnsignedInt(data[++pos]);
+                        pixel = new PixelRGBA(red, green, blue, pixel.a);
+                    }
+                    case RGBA -> {
+                        int red = Byte.toUnsignedInt(data[++pos]);
+                        int green = Byte.toUnsignedInt(data[++pos]);
+                        int blue = Byte.toUnsignedInt(data[++pos]);
+                        int alpha = Byte.toUnsignedInt(data[++pos]);
+                        pixel = new PixelRGBA(red, green, blue, alpha);
+                    }
+                    default -> System.err.println(tag.name());
                 }
+            } else
+                run--;
+            img.setRGB(x, y, pixel.int_ARGB());
+            index[pixel.indexPosition()] = pixel;
+            pos++;
+            x += 1;
+            if(x == width) {
+                x = 0;
+                y += 1;
             }
-        } catch(ArrayIndexOutOfBoundsException e) {
-            e.printStackTrace();
-            System.out.println("x: " + x + ", y: " + y);
-            System.out.println("width: " + width + ", height: " + height);
-            return img;
         }
         return img;
     }
 
-    public PixelRGBA decodeRGBA(int position) {
-        currByte += 4;
-        int red = wrapInt(qoi[position + 1]);
-        int green = wrapInt(qoi[position + 2]);
-        int blue = wrapInt(qoi[position + 3]);
-        int alpha = wrapInt(qoi[position] + 4);
-        return new PixelRGBA(red, green, blue, alpha);
-    }
-
-    public PixelRGBA decodeRGB(int position) {
-        currByte += 3;
-        int red = wrapInt(qoi[position + 1]);
-        int green = wrapInt(qoi[position + 2]);
-        int blue = wrapInt(qoi[position + 3]);
-        return new PixelRGBA(red, green, blue, prevPixel.a);
-    }
-
-    public void setPixelAndAdvance(PixelRGBA pixel) {
-        img.setRGB(x, y, pixel.int_ARGB());
-        if(pixelIndex[pixel.indexPosition()] == null)
-            pixelIndex[pixel.indexPosition()] = pixel;
-        prevPixel = pixel;
-        currByte += 1;
-        x += 1;
-        if(x == width) {
-            x = 0;
-            y += 1;
-        }
-    }
-
-    public void setPixelsInRun(int position) {
-        int run = qoi[position] & BOTTOM_SIX_MASK;
-        if(run < 0 || run > RUN_MAX)
-            System.err.println("Run tag had an invalid value of " + run);
-        run += RUN_OFFSET;
-        // throw new IllegalStateException("Run tag had an invalid value of " + run);
-        for(int i = 0; i < run; i++)
-            setPixelAndAdvance(prevPixel);
-    }
-
-    public PixelRGBA decodeLuma(int position) {
-        currByte += 1;
-        int byte1 = qoi[position];
-        int byte2 = qoi[position + 1];
-        int diffGreen = (byte1 & 0x3f) + LUMA_GREEN_OFFSET;
-        int redDiff = diffGreen - 8 + ((byte2 >> 4) & 0x0f);
-        int blueDiff = diffGreen - 8 + (byte2 & 0x0f);
-
-        /*
-        int luma = (qoi[position] << 8) + qoi[position + 1];
-        int greenDiff = luma & LUMA_MASK_GREEN;
-        int redDiff = luma & LUMA_MASK_RED;
-        int blueDiff = luma & LUMA_MASK_BLUE;
-         */
-
-        int red = wrapInt(prevPixel.r + redDiff);
-        int green = wrapInt(prevPixel.g + diffGreen);
-        int blue = wrapInt(prevPixel.b + blueDiff);
-
-        return new PixelRGBA(red, green, blue, prevPixel.a);
-    }
-
-    public PixelRGBA decodeIndex(int position) {
-        int index = qoi[position] & BOTTOM_SIX_MASK;
-        if(pixelIndex[index] == null) return new PixelRGBA();
-        return pixelIndex[index];
-    }
-
-    public PixelRGBA decodeDiff(int position) {
-        int redDiff = ((qoi[position] & DIFF_MASK_RED) >>> 4) + DIFF_OFFSET;
-        int greenDiff = ((qoi[position] & DIFF_MASK_GREEN) >>> 2) + DIFF_OFFSET;
-        int blueDiff = (qoi[position] & DIFF_MASK_BLUE) + DIFF_OFFSET;
-
-        int red = wrapInt(prevPixel.r + redDiff);
-        int green = wrapInt(prevPixel.g + greenDiff);
-        int blue = wrapInt(prevPixel.b + blueDiff);
-
-        return new PixelRGBA(red, green, blue, prevPixel.a);
-    }
-
-    public int wrapInt(int i) {
-        return i & Tag.BOTTOM_8_BITMASK;
-    }
-
-    public int decodeInt(int start) {
+    public static int decodeInt(int start, byte[] data) {
         int num = 0;
-        num = qoi[start] << 24;
-        num += qoi[start + 1] << 16;
-        num += qoi[start + 2] << 8;
-        num += qoi[start + 3];
+        num = data[start] << 24;
+        num += data[start + 1] << 16;
+        num += data[start + 2] << 8;
+        num += data[start + 3];
         return num;
     }
 

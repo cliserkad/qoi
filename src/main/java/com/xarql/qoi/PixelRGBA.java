@@ -37,12 +37,14 @@ public class PixelRGBA {
             throw new IllegalStateException(OUT_OF_BOUNDS + this);
         if(b < 0 || b > 255)
             throw new IllegalStateException(OUT_OF_BOUNDS + this);
+        if(a < 0 || a > 255)
+            throw new IllegalStateException(OUT_OF_BOUNDS + this);
     }
 
     @Override
     public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
+        if(this == o) return true;
+        if(o == null || getClass() != o.getClass()) return false;
         PixelRGBA pixelRGBA = (PixelRGBA) o;
         return r == pixelRGBA.r && g == pixelRGBA.g && b == pixelRGBA.b && a == pixelRGBA.a;
     }
